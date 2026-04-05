@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime
+from pathlib import Path
 
 from playwright.async_api import Playwright, async_playwright
 import os
@@ -61,13 +62,40 @@ async def get_tencent_cookie(account_file):
         browser = await playwright.chromium.launch(**options)
         # Setup context however you like.
         context = await browser.new_context()  # Pass any options
-        # Pause the page, and start recording manually.
         context = await set_init_script(context)
         page = await context.new_page()
         await page.goto("https://channels.weixin.qq.com")
-        await page.pause()
-        # 点击调试器的继续，保存cookie
+        tencent_logger.info("[+] 请在打开的浏览器中扫码登录视频号，登录成功后会自动保存 cookie")
+
+        login_detected = False
+        for _ in range(120):
+            await asyncio.sleep(2)
+            current_url = page.url
+            if "platform/post/create" in current_url or "platform/post/list" in current_url:
+                login_detected = True
+                break
+
+            if current_url != "https://channels.weixin.qq.com/":
+                try:
+                    await page.goto("https://channels.weixin.qq.com/platform/post/create")
+                    await page.wait_for_timeout(1000)
+                    if "platform/post/create" in page.url:
+                        login_detected = True
+                        break
+                except Exception:
+                    continue
+
+        if not login_detected:
+            await page.close()
+            await context.close()
+            await browser.close()
+            raise TimeoutError("等待视频号扫码登录超时")
+
         await context.storage_state(path=account_file)
+        tencent_logger.success(f"[+] 视频号 cookie 已保存: {account_file}")
+        await page.close()
+        await context.close()
+        await browser.close()
 
 
 async def weixin_setup(account_file, handle=False):
@@ -82,7 +110,19 @@ async def weixin_setup(account_file, handle=False):
 
 
 class TencentVideo(object):
-    def __init__(self, title, file_path, tags, publish_date: datetime, account_file, category=None, is_draft=False):
+    def __init__(
+        self,
+        title,
+        file_path,
+        tags,
+        publish_date: datetime,
+        account_file,
+        category=None,
+        is_draft=False,
+        cover_landscape_path=None,
+        cover_portrait_path=None,
+        description="",
+    ):
         self.title = title  # 视频标题
         self.file_path = file_path
         self.tags = tags
@@ -92,6 +132,9 @@ class TencentVideo(object):
         self.headless = LOCAL_CHROME_HEADLESS
         self.is_draft = is_draft  # 是否保存为草稿
         self.local_executable_path = LOCAL_CHROME_PATH or None
+        self.cover_landscape_path = str(cover_landscape_path) if cover_landscape_path else None
+        self.cover_portrait_path = str(cover_portrait_path) if cover_portrait_path else None
+        self.description = description.strip()
 
     async def set_schedule_time_tencent(self, page, publish_date):
         label_element = page.locator("label").filter(has_text="定时").nth(1)
@@ -135,6 +178,94 @@ class TencentVideo(object):
         file_input = page.locator('input[type="file"]')
         await file_input.set_input_files(self.file_path)
 
+    async def add_cover(self, page):
+        cover_candidates = [
+            ("横版", self.cover_landscape_path),
+            ("4:3", self.cover_landscape_path),
+            ("竖版", self.cover_portrait_path),
+            ("3:4", self.cover_portrait_path),
+        ]
+        available_paths = [path for _, path in cover_candidates if path]
+        if not available_paths:
+            return
+
+        trigger_candidates = [
+            page.get_by_text("编辑封面", exact=False).first,
+            page.get_by_text("设置封面", exact=False).first,
+            page.get_by_text("上传封面", exact=False).first,
+            page.get_by_role("button", name="编辑封面").first,
+            page.get_by_role("button", name="设置封面").first,
+            page.get_by_role("button", name="上传封面").first,
+        ]
+        cover_trigger = None
+        for candidate in trigger_candidates:
+            try:
+                if await candidate.count() and await candidate.is_visible():
+                    cover_trigger = candidate
+                    break
+            except Exception:
+                continue
+
+        if not cover_trigger:
+            tencent_logger.info("[-] 当前页面没有可见的封面编辑入口，跳过封面上传")
+            return
+
+        await cover_trigger.click()
+        await page.wait_for_timeout(1000)
+
+        for label_text, image_path in cover_candidates:
+            if not image_path:
+                continue
+            tab = page.get_by_text(label_text, exact=False).first
+            try:
+                if await tab.count() and await tab.is_visible():
+                    await tab.click()
+                    await page.wait_for_timeout(500)
+                    break
+            except Exception:
+                continue
+
+        upload_inputs = [
+            page.locator('input[type="file"]').nth(1),
+            page.locator('input[accept*="image"]').first,
+        ]
+        uploaded = False
+        for _, image_path in cover_candidates:
+            if not image_path:
+                continue
+            for upload_input in upload_inputs:
+                try:
+                    if await upload_input.count():
+                        await upload_input.set_input_files(image_path)
+                        uploaded = True
+                        tencent_logger.info(f"[-] 已尝试上传封面: {image_path}")
+                        break
+                except Exception:
+                    continue
+            if uploaded:
+                break
+
+        if not uploaded:
+            tencent_logger.info("[-] 没找到可用的封面上传 input，跳过封面上传")
+            return
+
+        confirm_candidates = [
+            page.get_by_role("button", name="确定").first,
+            page.get_by_role("button", name="完成").first,
+            page.get_by_role("button", name="保存").first,
+            page.get_by_text("确定", exact=False).first,
+            page.get_by_text("完成", exact=False).first,
+            page.get_by_text("保存", exact=False).first,
+        ]
+        for candidate in confirm_candidates:
+            try:
+                if await candidate.count() and await candidate.is_visible():
+                    await candidate.click()
+                    await page.wait_for_timeout(1000)
+                    break
+            except Exception:
+                continue
+
     async def upload(self, playwright: Playwright) -> None:
         # 使用 Chromium (这里使用系统内浏览器，用chromium 会造成h264错误
         browser = await playwright.chromium.launch(headless=self.headless, executable_path=self.local_executable_path)
@@ -154,6 +285,8 @@ class TencentVideo(object):
         await file_input.set_input_files(self.file_path)
         # 填充标题和话题
         await self.add_title_tags(page)
+        # 上传封面
+        await self.add_cover(page)
         # 添加商品
         # await self.add_product(page)
         # 合集功能
@@ -244,6 +377,11 @@ class TencentVideo(object):
         await page.locator("div.input-editor").click()
         await page.keyboard.type(self.title)
         await page.keyboard.press("Enter")
+        if self.description:
+            for line in self.description.splitlines():
+                if line.strip():
+                    await page.keyboard.type(line.strip())
+                await page.keyboard.press("Enter")
         for index, tag in enumerate(self.tags, start=1):
             await page.keyboard.type("#" + tag)
             await page.keyboard.press("Space")
