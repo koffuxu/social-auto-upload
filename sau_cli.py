@@ -132,6 +132,8 @@ class BilibiliVideoUploadRequest:
     tid: int
     tags: list[str]
     publish_date: datetime | int
+    cover_file: Path | None = None
+    only_self: bool = False
 
 
 def has_interactive_terminal() -> bool:
@@ -408,6 +410,10 @@ async def upload_bilibili_video(request: BilibiliVideoUploadRequest) -> Path:
         arguments.extend(["--tag", ",".join(request.tags)])
     if isinstance(request.publish_date, datetime):
         arguments.extend(["--dtime", str(int(request.publish_date.timestamp()))])
+    if request.cover_file:
+        arguments.extend(["--cover", str(request.cover_file)])
+    if request.only_self:
+        arguments.extend(["--is-only-self", "1"])
 
     result = run_biliup_command(arguments)
     if result.returncode != 0:
@@ -549,6 +555,8 @@ def build_parser() -> argparse.ArgumentParser:
     bilibili_upload_video_parser.add_argument("--desc", required=True, help="Video description")
     bilibili_upload_video_parser.add_argument("--tid", required=True, type=int, help="Bilibili category id")
     bilibili_upload_video_parser.add_argument("--tags", default="", help="Comma-separated tags, such as tag1,tag2")
+    bilibili_upload_video_parser.add_argument("--cover", type=existing_file_path, help="Optional cover image path")
+    bilibili_upload_video_parser.add_argument("--only-self", action="store_true", help="Set visibility to only self")
     bilibili_upload_video_parser.add_argument("--schedule", type=schedule_value, help=f"Schedule time in {schedule_help}")
     return parser
 
@@ -732,6 +740,8 @@ async def dispatch(args: argparse.Namespace) -> int:
                 tid=args.tid,
                 tags=parse_tags(args.tags),
                 publish_date=args.schedule or 0,
+                cover_file=args.cover,
+                only_self=args.only_self,
             )
             await upload_bilibili_video(request)
             print(f"Bilibili video upload submitted: {request.video_file}")
