@@ -278,7 +278,12 @@ class DouYinBaseUploader(BaseVideoUploader):
         await description_editor.click()
         await page.keyboard.press("Control+KeyA")
         await page.keyboard.press("Delete")
-        await page.keyboard.type(description)
+        normalized_description = (
+            description.replace("\\r\\n", "\n")
+            .replace("\\n", "\n")
+            .replace("\\r", "\n")
+        )
+        await page.keyboard.type(normalized_description)
 
         for tag in tags or []:
             await page.keyboard.type(" #" + tag)
@@ -367,6 +372,36 @@ class DouYinBaseUploader(BaseVideoUploader):
             douyin_logger.error(_msg("😢", f"设置商品链接时出错: {str(e)}"))
             return False
 
+    async def dismiss_guide_overlay(self, page: Page) -> None:
+        # Best-effort dismissal for Douyin guide overlays that intercept clicks.
+        try:
+            guide_dialog = page.locator('.shepherd-element, [class*="shepherd-"] [role="dialog"]')
+            if await guide_dialog.count() and await guide_dialog.first.is_visible():
+                close_candidates = [
+                    'button:has-text("跳过")',
+                    'button:has-text("知道了")',
+                    'button:has-text("我知道了")',
+                    'button:has-text("关闭")',
+                    'button[aria-label="关闭"]',
+                    'button[aria-label="Close"]',
+                    '.shepherd-cancel-icon',
+                ]
+                for selector in close_candidates:
+                    button = page.locator(selector).first
+                    if await button.count():
+                        await button.click(force=True)
+                        break
+                await guide_dialog.first.wait_for(state="hidden", timeout=3000)
+        except Exception:
+            # Ignore overlay dismiss failures; main flow should proceed.
+            pass
+
+        # Blur mention/tag popups that may intercept clicks.
+        try:
+            await page.keyboard.press("Escape")
+        except Exception:
+            pass
+
 
 class DouYinVideo(DouYinBaseUploader):
     def __init__(
@@ -442,10 +477,37 @@ class DouYinVideo(DouYinBaseUploader):
             return
 
         douyin_logger.info(_msg("🏃", "小人正在设置视频封面"))
-        await page.click('text="选择封面"')
+        await self.dismiss_guide_overlay(page)
         cover_locator_str = 'div[id*="creator-content-modal"]'
         cover_locator = page.locator(cover_locator_str)
-        await page.wait_for_selector(cover_locator_str)
+
+        trigger_candidates = [
+            'text="选择封面"',
+            'text="设置封面"',
+            'text="更换封面"',
+            'text="编辑封面"',
+        ]
+        opened = False
+        for _ in range(3):
+            for trigger in trigger_candidates:
+                trigger_locator = page.locator(trigger).first
+                if await trigger_locator.count():
+                    await trigger_locator.click(force=True)
+                    try:
+                        await page.wait_for_selector(cover_locator_str, timeout=3000)
+                        opened = True
+                        break
+                    except Exception:
+                        pass
+            if opened:
+                break
+            await self.dismiss_guide_overlay(page)
+            await page.mouse.wheel(0, 600)
+            await asyncio.sleep(0.5)
+
+        if not opened:
+            douyin_logger.warning(_msg("😵", "没能打开封面弹窗，先跳过封面设置"))
+            return
 
         upload_input = cover_locator.locator("div[class^='semi-upload upload'] >> input.semi-upload-hidden-input")
 
