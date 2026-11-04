@@ -46,6 +46,7 @@ def register(platform_parsers):
     tencent_upload_video_parser.add_argument("--category", help="Optional original content category")
     tencent_upload_video_parser.add_argument("--draft", action="store_true", help="Save as draft instead of publishing")
     tencent_upload_video_parser.add_argument("--original", action="store_true", help="勾选「声明原创」并同意原创声明须知")
+    tencent_upload_video_parser.add_argument("--no-ai-label", action="store_true", help="不选「视频标注：含AI生成内容」")
     tencent_upload_video_parser.add_argument("--collection", default=None, help="Optional collection name to add the work into (must already exist)")
     add_runtime_flags(tencent_upload_video_parser)
 
@@ -69,6 +70,7 @@ class TencentVideoUploadRequest:
     headless: bool = True
     collection_name: str | None = None
     declare_original: bool = False
+    ai_label: bool = True
 
 
 async def login_tencent_account(account_name: str, headless: bool = True) -> dict:
@@ -115,6 +117,8 @@ async def upload_tencent_video(request: TencentVideoUploadRequest) -> Path:
         collection_name=request.collection_name,
     )
     app.declare_original = request.declare_original
+    if not request.ai_label:
+        app.content_label = "none"
     await app.tencent_upload_video()
     return account_file
 
@@ -154,6 +158,7 @@ async def run(args):
             headless=args.headless,
             collection_name=args.collection,
             declare_original=getattr(args, "original", False),
+            ai_label=not getattr(args, "no_ai_label", False),
         )
         await upload_tencent_video(request)
         print(f"Tencent/WeChat Channels video upload submitted: {request.video_file}")

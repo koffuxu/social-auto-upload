@@ -811,6 +811,9 @@ class TencentBaseUploader(BaseVideoUploader):
         # 依平台合规要求如实选「含AI生成内容」（与「内容为转载」等并列，选定即可、无需填写来源）。
         # 注意：这与上方独立的「声明原创」复选框是两个不同字段，本项目走 AI 标注、不勾原创声明。
         label_text = getattr(self, "content_label", None) or "含AI生成内容"
+        if label_text == "none":
+            tencent_logger.info(_msg("🧾", "按参数不选视频标注"))
+            return
         try:
             entry = page.get_by_text("选择视频标注", exact=True).first
             if not await entry.count():
