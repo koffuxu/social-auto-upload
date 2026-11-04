@@ -1,3 +1,6 @@
+import sau_commands.douyin
+import sau_commands.tencent
+import sau_commands.xiaohongshu
 import asyncio
 import tempfile
 import unittest
@@ -37,6 +40,98 @@ class BrowserCliParserTests(unittest.TestCase):
             )
 
         self.assertEqual(args.desc, "视频简介")
+
+    def test_douyin_upload_video_accepts_dual_thumbnail_aspects(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video_path = Path(tmp_dir) / "demo.mp4"
+            landscape_path = Path(tmp_dir) / "landscape.png"
+            portrait_path = Path(tmp_dir) / "portrait.png"
+            video_path.write_bytes(b"video")
+            landscape_path.write_bytes(b"image")
+            portrait_path.write_bytes(b"image")
+
+            parser = sau_cli.build_parser()
+            args = parser.parse_args(
+                [
+                    "douyin",
+                    "upload-video",
+                    "--account",
+                    "creator",
+                    "--file",
+                    str(video_path),
+                    "--title",
+                    "标题",
+                    "--thumbnail-landscape",
+                    str(landscape_path),
+                    "--thumbnail-portrait",
+                    str(portrait_path),
+                ]
+            )
+
+        self.assertEqual(args.thumbnail_landscape, landscape_path)
+        self.assertEqual(args.thumbnail_portrait, portrait_path)
+
+    def test_douyin_upload_video_accepts_explicit_declaration(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video_path = Path(tmp_dir) / "demo.mp4"
+            video_path.write_bytes(b"video")
+            parser = sau_cli.build_parser()
+            args = parser.parse_args([
+                "douyin", "upload-video", "--account", "creator",
+                "--file", str(video_path), "--title", "标题",
+                "--declaration", "已确认声明原文",
+            ])
+        self.assertEqual(args.declaration, "已确认声明原文")
+
+    def test_douyin_upload_video_has_no_implicit_declaration(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video_path = Path(tmp_dir) / "demo.mp4"
+            video_path.write_bytes(b"video")
+            args = sau_cli.build_parser().parse_args([
+                "douyin", "upload-video", "--account", "creator",
+                "--file", str(video_path), "--title", "标题",
+            ])
+        self.assertIsNone(args.declaration)
+
+    def test_douyin_request_legacy_positional_runtime_flags_keep_their_meaning(self):
+        request = sau_commands.douyin.DouyinVideoUploadRequest(
+            "creator", Path("demo.mp4"), "标题", "简介", [], 0,
+            None, None, None, "", "", "scheduled", False, False,
+        )
+        self.assertEqual(request.publish_strategy, "scheduled")
+        self.assertFalse(request.debug)
+        self.assertFalse(request.headless)
+        self.assertIsNone(request.declaration)
+
+    def test_tencent_upload_video_accepts_dual_thumbnail_aspects(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            video_path = Path(tmp_dir) / "demo.mp4"
+            landscape_path = Path(tmp_dir) / "landscape.png"
+            portrait_path = Path(tmp_dir) / "portrait.png"
+            video_path.write_bytes(b"video")
+            landscape_path.write_bytes(b"image")
+            portrait_path.write_bytes(b"image")
+
+            parser = sau_cli.build_parser()
+            args = parser.parse_args(
+                [
+                    "tencent",
+                    "upload-video",
+                    "--account",
+                    "creator",
+                    "--file",
+                    str(video_path),
+                    "--title",
+                    "标题",
+                    "--thumbnail-landscape",
+                    str(landscape_path),
+                    "--thumbnail-portrait",
+                    str(portrait_path),
+                ]
+            )
+
+        self.assertEqual(args.thumbnail_landscape, landscape_path)
+        self.assertEqual(args.thumbnail_portrait, portrait_path)
 
     def test_kuaishou_upload_note_accepts_title_and_note(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -109,9 +204,28 @@ class BrowserCliParserTests(unittest.TestCase):
 
 
 class BrowserCliDispatchTests(unittest.TestCase):
+    def test_upload_tencent_video_forwards_collection_name_to_uploader(self):
+        request = sau_commands.tencent.TencentVideoUploadRequest(
+            account_name="creator",
+            video_file=Path("demo.mp4"),
+            title="视频标题",
+            description="视频简介",
+            tags=["测试"],
+            publish_date=0,
+            collection_name="我的合集",
+        )
+
+        with (
+            patch("sau_commands.tencent.tencent_setup", new=AsyncMock(return_value=True)),
+            patch.object(sau_commands.tencent.TencentVideo, "tencent_upload_video", new=AsyncMock()) as mock_upload,
+        ):
+            asyncio.run(sau_commands.tencent.upload_tencent_video(request))
+
+        mock_upload.assert_awaited_once()
+
     def test_dispatch_xiaohongshu_check_prints_valid(self):
         args = Namespace(platform="xiaohongshu", action="check", account="creator")
-        with patch("sau_cli.check_xiaohongshu_account", new=AsyncMock(return_value=True)):
+        with patch("sau_commands.xiaohongshu.check_xiaohongshu_account", new=AsyncMock(return_value=True)):
             code = asyncio.run(sau_cli.dispatch(args))
         self.assertEqual(code, 0)
 
@@ -123,17 +237,74 @@ class BrowserCliDispatchTests(unittest.TestCase):
             images=[Path("1.png")],
             title="图文标题",
             note="图文正文",
+            notef="",
+            bgm="",
             tags="测试,图文",
             schedule=0,
             debug=False,
             headless=True,
         )
-        with patch("sau_cli.upload_note", new=AsyncMock()) as mock_upload:
+        with patch("sau_commands.douyin.upload_note", new=AsyncMock()) as mock_upload:
             asyncio.run(sau_cli.dispatch(args))
 
         request = mock_upload.await_args.args[0]
         self.assertEqual(request.title, "图文标题")
         self.assertEqual(request.note, "图文正文")
+
+    def test_dispatch_douyin_upload_video_uses_dual_thumbnail_request_fields(self):
+        args = Namespace(
+            platform="douyin",
+            action="upload-video",
+            account="creator",
+            file=Path("demo.mp4"),
+            title="视频标题",
+            desc="视频简介",
+            tags="测试,视频",
+            schedule=0,
+            thumbnail=None,
+            thumbnail_landscape=Path("landscape.png"),
+            thumbnail_portrait=Path("portrait.png"),
+            product_link="",
+            product_title="",
+            declaration="已确认声明原文",
+            collection=None,
+            debug=False,
+            headless=True,
+        )
+        with patch("sau_commands.douyin.upload_video", new=AsyncMock()) as mock_upload:
+            asyncio.run(sau_cli.dispatch(args))
+
+        request = mock_upload.await_args.args[0]
+        self.assertEqual(request.thumbnail_landscape_file, Path("landscape.png"))
+        self.assertEqual(request.thumbnail_portrait_file, Path("portrait.png"))
+        self.assertEqual(request.declaration, "已确认声明原文")
+
+    def test_dispatch_tencent_upload_video_uses_dual_thumbnail_request_fields(self):
+        args = Namespace(
+            platform="tencent",
+            action="upload-video",
+            account="creator",
+            file=Path("demo.mp4"),
+            title="视频标题",
+            desc="视频简介",
+            tags="测试,视频",
+            schedule=0,
+            thumbnail=None,
+            thumbnail_landscape=Path("landscape.png"),
+            thumbnail_portrait=Path("portrait.png"),
+            short_title=None,
+            category=None,
+            collection=None,
+            draft=False,
+            debug=False,
+            headless=True,
+        )
+        with patch("sau_commands.tencent.upload_tencent_video", new=AsyncMock()) as mock_upload:
+            asyncio.run(sau_cli.dispatch(args))
+
+        request = mock_upload.await_args.args[0]
+        self.assertEqual(request.thumbnail_landscape_file, Path("landscape.png"))
+        self.assertEqual(request.thumbnail_portrait_file, Path("portrait.png"))
 
     def test_dispatch_xiaohongshu_upload_video_uses_headed_request(self):
         args = Namespace(
@@ -149,7 +320,7 @@ class BrowserCliDispatchTests(unittest.TestCase):
             debug=False,
             headless=False,
         )
-        with patch("sau_cli.upload_xiaohongshu_video", new=AsyncMock()) as mock_upload:
+        with patch("sau_commands.xiaohongshu.upload_xiaohongshu_video", new=AsyncMock()) as mock_upload:
             asyncio.run(sau_cli.dispatch(args))
 
         request = mock_upload.await_args.args[0]
@@ -170,7 +341,7 @@ class BrowserCliDispatchTests(unittest.TestCase):
             debug=False,
             headless=True,
         )
-        with patch("sau_cli.upload_xiaohongshu_note", new=AsyncMock()) as mock_upload:
+        with patch("sau_commands.xiaohongshu.upload_xiaohongshu_note", new=AsyncMock()) as mock_upload:
             asyncio.run(sau_cli.dispatch(args))
 
         request = mock_upload.await_args.args[0]

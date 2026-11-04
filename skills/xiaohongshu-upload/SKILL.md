@@ -1,6 +1,11 @@
 ---
 name: xiaohongshu-upload
 description: 当 agent 需要通过已安装的 `sau` CLI 完成小红书登录、cookie 校验、视频上传或图文发布时使用这个 skill。该 skill 适用于已经安装 `social-auto-upload` 且可调用 `sau` 命令的环境。优先使用这个 skill 进行稳定的命令式小红书工作流，而不是一开始就阅读 uploader 源码。
+license: MIT-0
+slug: social-auto-upload-xiaohongshu-upload
+displayName: 小红书视频与图文发布
+version: 1.0.0
+summary: 使用 sau 登录小红书并发布视频或图文。
 ---
 
 # 小红书上传 Skill
@@ -54,14 +59,6 @@ description: 当 agent 需要通过已安装的 `sau` CLI 完成小红书登录�
 - 只有用户明确要求定时发布时，才使用 `--schedule`
 - 如果登录流程生成了本地二维码图片，不要只把图片路径告诉用户
 - 二维码图片本身就是给用户扫码的，优先直接把本地图片展示/发送给用户
-
-## 模板文件
-
-当你需要稳定的命令模板时，使用 `scripts/examples/` 下的文件：
-
-- `xiaohongshu_commands.ps1`
-- `xiaohongshu_commands.sh`
-- `xiaohongshu_cli_template.py`
 
 ## 参考文档
 

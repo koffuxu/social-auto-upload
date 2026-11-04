@@ -1,6 +1,11 @@
 ---
 name: bilibili-upload
 description: 当 agent 需要通过已安装的 `sau` CLI 完成 Bilibili 登录、账号校验或视频上传时使用这个 skill。优先使用 `sau bilibili ...`，程序会自动准备 `biliup`，不要求用户手动安装。
+license: MIT-0
+slug: social-auto-upload-bilibili-upload
+displayName: Bilibili 视频发布
+version: 1.0.0
+summary: 登录哔哩哔哩并发布视频，支持分区选择。
 ---
 
 # Bilibili 上传 Skill
@@ -40,12 +45,6 @@ description: 当 agent 需要通过已安装的 `sau` CLI 完成 Bilibili 登录
 - 对 agent 来说，不要在非交互环境里硬跑 `sau bilibili login`
 - 正确做法是让用户自己在本地终端执行 `sau bilibili login --account <name>`
 - 如果终端里的二维码显示不完整，提醒用户直接打开当前目录下的 `qrcode.png` 扫码
-
-## 模板文件
-
-- `scripts/examples/bilibili_commands.ps1`
-- `scripts/examples/bilibili_commands.sh`
-- `scripts/examples/bilibili_cli_template.py`
 
 ## 参考文档
 
